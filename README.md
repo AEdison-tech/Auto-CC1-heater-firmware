@@ -1,20 +1,21 @@
-# Elegoo Chamber Heater Controller
+# CC Heater — Elegoo Chamber Heater Controller
 
 An ESP32-C3 based controller that automatically heats a 3D printer enclosure by monitoring the Elegoo Centauri Carbon printer's status via WebSocket and controlling a relay-driven heater with a fan and temperature sensor.
 
-## Features
+> **Inspired by** [BIQU Panda Breath](https://github.com/bigtreetech/Panda-Breath) for Bambu Lab X1C/P1S/A1 — a similar concept brought to the Elegoo Centauri Carbon ecosystem.
+>
+> **Built on top of** the excellent work by [jrowny/cc_sfs](https://github.com/jrowny/cc_sfs) and [mikeleet/cc_sfs_cf](https://github.com/mikeleet/cc_sfs_cf). Many thanks to both authors — the WebSocket communication layer, web UI architecture, and ESP32 integration patterns in this project are derived from their work. Please check out their repositories!
 
-- **Automatic activation** — heater starts when the printer's bed temperature crosses a configurable threshold (optionally only during an active print)
-- **Temperature control source** — choose between the local DS18B20 sensor or the printer's reported chamber temperature (TempOfBox) for on/off control
-- **Hysteresis control** — stable on/off switching around the target temperature using a configurable dead-band
-- **Fan cooldown** — fan runs for 30 seconds after the heater turns off to dissipate residual heat
-- **Wi-Fi provisioning** via [Improv Serial](https://www.improv-wifi.com/) or AP mode fallback
-- **Web interface** — responsive SPA (Solid.js + DaisyUI) served directly from the ESP32's LittleFS filesystem
-- **OTA firmware update** via [ElegantOTA](https://github.com/ayushsharma82/ElegantOTA)
-- **Debug mode** — override bed temp, heater temp, chamber temp, and printing state without a real printer
-- **mDNS** — accessible at `http://ccheater.local` on the local network
+---
 
 ## Hardware
+
+> 📷 *Photos coming soon*
+
+<!-- PHOTO: Assembled unit — front view -->
+<!-- PHOTO: Assembled unit — inside / wiring -->
+<!-- PHOTO: Mounted in printer enclosure -->
+<!-- PHOTO: Web interface screenshot -->
 
 | Component | Description |
 |-----------|-------------|
@@ -34,6 +35,22 @@ TEMP_SENSOR_PIN = 3   (DS18B20 one-wire)
 ```
 
 Pins can be overridden in `platformio.ini` via `build_flags`.
+
+---
+
+## Features
+
+- **Automatic activation** — heater starts when the printer's bed temperature crosses a configurable threshold (optionally only during an active print)
+- **Temperature control source** — choose between the local DS18B20 sensor or the printer's reported chamber temperature (TempOfBox) for on/off control
+- **Hysteresis control** — stable on/off switching around the target temperature using a configurable dead-band
+- **Fan cooldown** — fan runs for 30 seconds after the heater turns off to dissipate residual heat
+- **Wi-Fi provisioning** via [Improv Serial](https://www.improv-wifi.com/) or AP mode fallback
+- **Web interface** — responsive SPA (Solid.js + DaisyUI) served directly from the ESP32's LittleFS filesystem
+- **OTA firmware update** via [ElegantOTA](https://github.com/ayushsharma82/ElegantOTA)
+- **Debug mode** — override bed temp, heater temp, chamber temp, and printing state without a real printer
+- **mDNS** — accessible at `http://ccheater.local` on the local network
+
+---
 
 ## How It Works
 
@@ -56,6 +73,8 @@ The **control temperature source** is configurable:
 - `Heater Temperature` — DS18B20 sensor mounted in the enclosure *(default)*
 - `Chamber Temperature` — `TempOfBox` reported by the printer
 
+---
+
 ## Prerequisites
 
 - [PlatformIO](https://platformio.org/) (VS Code extension or CLI)
@@ -66,10 +85,14 @@ The **control temperature source** is configurable:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/cc_heater.git
-cd cc_heater
+git clone https://github.com/petervarholy-tech/CC-Heater.git
+cd CC-Heater
 
-# Build and upload firmware + filesystem in one step
+# Copy and edit the settings template before first flash
+cp data/user_settings.example.json data/user_settings.json
+# (edit user_settings.json with your WiFi and printer IP)
+
+# Build and upload firmware + filesystem
 # (PlatformIO automatically builds the web UI via build_web.py)
 pio run --target upload
 pio run --target uploadfs
@@ -89,6 +112,8 @@ The `build_web.py` pre-build script automatically:
 
 Alternatively, use **Improv Serial** provisioning via the serial monitor right after flashing.
 
+---
+
 ## Web Interface
 
 | Page | Description |
@@ -99,6 +124,8 @@ Alternatively, use **Improv Serial** provisioning via the serial monitor right a
 | **Logs** | Live serial log viewer |
 | **Update** | OTA firmware update (via ElegantOTA) |
 | **About** | Firmware version and chip info |
+
+---
 
 ## Configuration
 
@@ -117,6 +144,8 @@ All settings are stored in `/user_settings.json` on LittleFS and editable via th
 | `enabled` | `true` | Master enable/disable switch |
 | `debug` | `false` | Show the Debug page and enable temperature/state overrides |
 
+---
+
 ## REST API
 
 | Endpoint | Method | Description |
@@ -129,6 +158,20 @@ All settings are stored in `/user_settings.json` on LittleFS and editable via th
 | `/version` | GET | Firmware version and chip info |
 | `/update` | GET/POST | OTA firmware update (ElegantOTA) |
 
+---
+
+## Acknowledgements
+
+This project would not exist without the groundwork laid by:
+
+- **[jrowny/cc_sfs](https://github.com/jrowny/cc_sfs)** — the original ESP32 filament sensor project for the Elegoo Centauri Carbon, which established the WebSocket communication protocol, LittleFS-based web UI delivery, and overall firmware architecture used here.
+- **[mikeleet/cc_sfs_cf](https://github.com/mikeleet/cc_sfs_cf)** — an enhanced fork with a modern Solid.js web interface, improved firmware structure, and additional features. The web UI in this project is directly derived from this work.
+- **[BIQU Panda Breath](https://github.com/bigtreetech/Panda-Breath)** — inspiration for applying the chamber-heater concept to the resin printing workflow.
+
+---
+
 ## License
 
-MIT
+MIT License — see [LICENSE](LICENSE) for details.
+
+This project is derived from [cc_sfs](https://github.com/jrowny/cc_sfs) (MIT) and [cc_sfs_cf](https://github.com/mikeleet/cc_sfs_cf) (MIT).
