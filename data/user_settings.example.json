@@ -1,0 +1,14 @@
+{
+  "ap_mode": true,
+  "ssid": "",
+  "passwd": "",
+  "elegooip": "",
+  "activation_temp": 70.0,
+  "control_source": "heater",
+  "require_printing": false,
+  "target_temp": 60.0,
+  "hysteresis": 5.0,
+  "enabled": true,
+  "has_connected": false,
+  "debug": false
+}
