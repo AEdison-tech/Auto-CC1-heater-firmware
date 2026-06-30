@@ -1,9 +1,23 @@
-import { createSignal } from 'solid-js'
+import { createSignal, onMount, onCleanup } from 'solid-js'
 import { debugBedTemp, setDebugBedTemp, debugHeaterTemp, setDebugHeaterTemp, debugChamberTemp, setDebugChamberTemp, debugIsPrinting, setDebugIsPrinting } from './store'
 
 function Debug() {
   const [success, setSuccess] = createSignal(false)
   const [error, setError] = createSignal('')
+  const [rssi, setRssi] = createSignal<number | null>(null)
+
+  onMount(() => {
+    const fetchRssi = async () => {
+      try {
+        const res = await fetch('/api/status')
+        const data = await res.json()
+        setRssi(data.rssi ?? null)
+      } catch (_) {}
+    }
+    fetchRssi()
+    const id = setInterval(fetchRssi, 3000)
+    onCleanup(() => clearInterval(id))
+  })
 
   const handleApply = async () => {
     try {
@@ -61,7 +75,15 @@ function Debug() {
         </label>
       </fieldset>
 
-      <button class="btn btn-accent btn-soft mt-6" onClick={handleApply}>
+      <div class="mt-6 flex items-center gap-3">
+        <span class="text-sm font-semibold">WiFi Signal:</span>
+        {rssi() !== null
+          ? <span class="badge badge-neutral text-sm">{rssi()} dBm</span>
+          : <span class="text-sm text-base-content/40">—</span>
+        }
+      </div>
+
+      <button class="btn btn-accent btn-soft mt-4" onClick={handleApply}>
         Apply
       </button>
     </div>

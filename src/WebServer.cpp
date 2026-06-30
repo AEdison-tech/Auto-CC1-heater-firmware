@@ -1,6 +1,7 @@
 #include "WebServer.h"
 
 #include <AsyncJson.h>
+#include <WiFi.h>
 
 #include "ElegooCC.h"
 #include "HeaterController.h"
@@ -77,6 +78,7 @@ void WebServer::begin()
                   doc["bedTemp"]      = debugMode ? settingsManager.debugBedTemp    : printer.bedTemp;
                   doc["chamberTemp"]  = printer.chamberTemp;
                   doc["debug"]        = debugMode;
+                  doc["rssi"]         = WiFi.RSSI();
 
                   JsonObject elegoo         = doc.createNestedObject("elegoo");
                   elegoo["isConnected"]     = printer.isWebsocketConnected;
