@@ -5,6 +5,7 @@ function Debug() {
   const [success, setSuccess] = createSignal(false)
   const [error, setError] = createSignal('')
   const [rssi, setRssi] = createSignal<number | null>(null)
+  const [restarting, setRestarting] = createSignal(false)
 
   onMount(() => {
     const fetchRssi = async () => {
@@ -85,6 +86,14 @@ function Debug() {
 
       <button class="btn btn-accent btn-soft mt-4" onClick={handleApply}>
         Apply
+      </button>
+
+      <button class="btn btn-error btn-soft mt-3" disabled={restarting()} onClick={async () => {
+        setRestarting(true)
+        await new Promise(r => setTimeout(r, 1000))
+        fetch('/restart', { method: 'POST' })
+      }}>
+        ESP Reboot
       </button>
     </div>
   )

@@ -24,7 +24,7 @@ function App(props: ParentProps) {
   }
 
   return (
-    <div class="flex flex-col items-center h-screen pt-10 bg-base-200 ">
+    <div class="flex flex-col items-center min-h-screen pt-10 bg-base-200">
       <h1 class="text-xl font-bold w-full max-w-5xl pl-1 pb-4">Elegoo Centauri Carbon <span class="text-accent">Chamber Heater</span></h1>
       <div class="tabs tabs-lift w-full max-w-5xl">
 
@@ -56,8 +56,10 @@ function App(props: ParentProps) {
 
       </div>
 
-      <div class="w-full max-w-5xl bg-base-100 border-base-300 p-6">
-        {props.children}
+      <div class="w-full max-w-5xl flex-1">
+        <div class="bg-base-100 border-base-300 p-6 min-h-full">
+          {props.children}
+        </div>
       </div>
     </div>
   )

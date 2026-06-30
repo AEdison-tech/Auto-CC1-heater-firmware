@@ -79,7 +79,7 @@ function Settings() {
   }
 
   return (
-    <div class="card">
+    <div>
       {loading() ? (
         <p>Loading settings... <span class="loading loading-spinner loading-xl"></span></p>
       ) : (

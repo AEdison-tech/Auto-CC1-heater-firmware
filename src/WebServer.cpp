@@ -113,6 +113,16 @@ void WebServer::begin()
                   request->send(200, "application/json", response);
               });
 
+    // --- Restart ---
+
+    server.on("/restart", HTTP_POST,
+              [](AsyncWebServerRequest *request)
+              {
+                  request->send(200, "text/plain", "Restarting...");
+                  delay(100);
+                  ESP.restart();
+              });
+
     // --- OTA ---
     ElegantOTA.begin(&server);
 
