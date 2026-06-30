@@ -146,20 +146,6 @@ All settings are stored in `/user_settings.json` on LittleFS and editable via th
 
 ---
 
-## REST API
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/get_settings` | GET | Returns current settings as JSON (password excluded) |
-| `/update_settings` | POST | Update settings (JSON body) |
-| `/api/status` | GET | Live status: temperatures, heater/fan state, printer info |
-| `/api/logs` | GET | Serial logs as JSON array |
-| `/debug_override` | POST | Override bed/heater/chamber temp and printing state |
-| `/version` | GET | Firmware version and chip info |
-| `/update` | GET/POST | OTA firmware update (ElegantOTA) |
-
----
-
 ## Acknowledgements
 
 This project would not exist without the groundwork laid by:
@@ -173,5 +159,3 @@ This project would not exist without the groundwork laid by:
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
-
-This project is derived from [cc_sfs](https://github.com/jrowny/cc_sfs) (MIT) and [cc_sfs_cf](https://github.com/mikeleet/cc_sfs_cf) (MIT).
