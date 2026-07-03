@@ -1,4 +1,4 @@
-# Auto-CC-heater-firmware — Elegoo Chamber Heater Controller
+# Elegoo Centauri Carbon automatic chamber heater firmware
 
 An ESP32-C3 based controller that automatically heats a 3D printer enclosure by monitoring the Elegoo Centauri Carbon printer's status via WebSocket and controlling a relay-driven heater with a fan and temperature sensor.
 
