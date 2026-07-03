@@ -10,12 +10,9 @@ An ESP32-C3 based controller that automatically heats a 3D printer enclosure by 
 
 ## Hardware
 
-> 📷 *Photos coming soon*
-
-<!-- PHOTO: Assembled unit — front view -->
-<!-- PHOTO: Assembled unit — inside / wiring -->
-<!-- PHOTO: Mounted in printer enclosure -->
-<!-- PHOTO: Web interface screenshot -->
+![](photo/IMG20260628152852.jpg)
+![](photo/IMG20260630171830.jpg)
+![](photo/IMG20260630173628.jpg)
 
 | Component | Description |
 |-----------|-------------|
