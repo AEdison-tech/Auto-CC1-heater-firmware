@@ -113,7 +113,7 @@ function Settings() {
               <div role="alert" class="mt-4 alert alert-info alert-soft">
                 <span>
                   After changing WiFi you may need to reconnect. If connection fails the device
-                  reverts to AP mode — connect to <strong>ElegooXBTTSFS20</strong> and visit{' '}
+                  reverts to AP mode — connect to <strong>ElegooChamberHeater</strong> and visit{' '}
                   <a class="link link-accent" href="http://192.168.4.1">192.168.4.1</a>.
                   With mDNS: <a class="link link-accent" href="http://ccheater.local">ccheater.local</a>
                 </span>

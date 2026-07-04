@@ -104,7 +104,7 @@ The `build_web.py` pre-build script automatically:
 
 ## First-Time Setup
 
-1. After flashing, the device starts in **AP mode** — connect to Wi-Fi network `ElegooXBTTSFS20` (password: `elegoocc`).
+1. After flashing, the device starts in **AP mode** — connect to Wi-Fi network `ElegooChamberHeater` (password: `elegoocc`).
 2. Open `http://10.10.10.10` in your browser.
 3. Enter your Wi-Fi credentials and the printer's IP address, then save.
 4. The device reboots into station mode and is reachable at `http://ccheater.local` (or its assigned IP).
