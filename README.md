@@ -19,7 +19,7 @@ An ESP32-C3 based controller that automatically heats a 3D printer enclosure by 
 ![](photo/IMG20260630173628.jpg)
 
 > 🔧 PCB design and assembly instructions live in a separate repository:
-> **[AEdison-tech/Auto-CC-heater-hardware](https://github.com/AEdison-tech/Auto-CC-heater-hardware)** *(coming soon)*.
+> **[AEdison-tech/Auto-CC-heater-hardware](https://github.com/AEdison-tech/Auto-CC-heater-hardware)**.
 
 | Component | Description |
 |-----------|-------------|
