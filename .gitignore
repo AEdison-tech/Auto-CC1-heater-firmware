@@ -1,0 +1,22 @@
+# PlatformIO
+.pio
+
+# VSCode
+.vscode/
+
+# Local scripts
+upload.bat
+*.code-workspace
+
+# Node / frontend
+webui/node_modules
+webui/dist
+website/node_modules
+website/.vite
+website/dist
+
+# Device-specific config with credentials — use user_settings.example.json as template
+data/user_settings.json
+
+# Claude Code session data
+.claude
