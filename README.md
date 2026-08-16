@@ -1,5 +1,9 @@
 # Elegoo Centauri Carbon automatic chamber heater firmware
 
+[![Build firmware](https://github.com/AEdison-tech/Auto-CC-heater-firmware/actions/workflows/firmware.yml/badge.svg)](https://github.com/AEdison-tech/Auto-CC-heater-firmware/actions/workflows/firmware.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform: ESP32-C3](https://img.shields.io/badge/platform-ESP32--C3-informational.svg)](platformio.ini)
+
 An ESP32-C3 based controller that automatically heats a 3D printer enclosure by monitoring the Elegoo Centauri Carbon printer's status via WebSocket and controlling a relay-driven heater with a fan and temperature sensor.
 
 > **Inspired by** [BIQU Panda Breath](https://github.com/bigtreetech/Panda-Breath) for Bambu Lab X1C/P1S/A1 — a similar concept brought to the Elegoo Centauri Carbon ecosystem.
@@ -14,7 +18,8 @@ An ESP32-C3 based controller that automatically heats a 3D printer enclosure by 
 ![](photo/IMG20260630171830.jpg)
 ![](photo/IMG20260630173628.jpg)
 
-> 🔧 *PCB design and assembly instructions will be added later.*
+> 🔧 PCB design and assembly instructions live in a separate repository:
+> **[AEdison-tech/Auto-CC-heater-hardware](https://github.com/AEdison-tech/Auto-CC-heater-hardware)** *(coming soon)*.
 
 | Component | Description |
 |-----------|-------------|
@@ -84,8 +89,8 @@ The **control temperature source** is configurable:
 
 ```bash
 # Clone the repository
-git clone https://github.com/petervarholy-tech/CC-Heater.git
-cd CC-Heater
+git clone https://github.com/AEdison-tech/Auto-CC-heater-firmware.git
+cd Auto-CC-heater-firmware
 
 # Copy and edit the settings template before first flash
 cp data/user_settings.example.json data/user_settings.json
@@ -135,7 +140,7 @@ All settings are stored in `/user_settings.json` on LittleFS and editable via th
 | `ssid` | — | Wi-Fi network name |
 | `passwd` | — | Wi-Fi password |
 | `elegooip` | — | Printer IP address |
-| `activation_temp` | `70.0` °C | Bed temperature threshold to allow heating |
+| `activation_temp` | `85.0` °C | Bed temperature threshold to allow heating |
 | `require_printing` | `false` | Require an active print for the heater to activate |
 | `control_source` | `"heater"` | Temperature source for on/off control: `"heater"` (DS18B20) or `"chamber"` (TempOfBox) |
 | `target_temp` | `60.0` °C | Desired enclosure temperature |

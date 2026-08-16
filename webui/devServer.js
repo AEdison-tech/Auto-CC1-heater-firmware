@@ -11,9 +11,9 @@ const mockSettings = {
   ssid: "MyHomeWiFi",
   ap_mode: true,
   elegooip: "192.168.1.100",
-  activation_temp: 30.0,
-  target_temp: 35.0,
-  hysteresis: 2.0,
+  activation_temp: 85.0,
+  target_temp: 60.0,
+  hysteresis: 5.0,
   enabled: true,
 };
 

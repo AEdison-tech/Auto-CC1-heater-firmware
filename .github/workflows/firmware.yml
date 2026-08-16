@@ -1,0 +1,84 @@
+name: Build firmware
+
+# Builds the PlatformIO project (firmware + web UI + LittleFS image, merged
+# into one flashable binary) on every push/PR, and additionally attaches the
+# binaries to a GitHub Release whenever one is published. To cut a release:
+# GitHub -> Releases -> Draft a new release -> pick/create a tag (e.g.
+# v1.0.0) -> Publish release. This workflow then runs automatically and
+# uploads the firmware to that release.
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  release:
+    types: [ published ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: ${{ runner.os }}-platformio-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-platformio-
+
+      - name: Cache webui npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: webui/node_modules
+          key: ${{ runner.os }}-webui-npm-${{ hashFiles('webui/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-webui-npm-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build firmware (esp32-c3)
+        run: pio run -e esp32-c3
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp32-c3
+          path: |
+            .pio/build/esp32-c3/firmware.bin
+            .pio/build/esp32-c3/bootloader.bin
+            .pio/build/esp32-c3/partitions.bin
+            .pio/build/esp32-c3/littlefs.bin
+            .pio/build/esp32-c3/firmware_merged.bin
+
+      - name: Attach binaries to the release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: |
+            .pio/build/esp32-c3/firmware.bin
+            .pio/build/esp32-c3/bootloader.bin
+            .pio/build/esp32-c3/partitions.bin
+            .pio/build/esp32-c3/littlefs.bin
+            .pio/build/esp32-c3/firmware_merged.bin

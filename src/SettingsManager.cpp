@@ -27,7 +27,7 @@ SettingsManager::SettingsManager()
     settings.ssid              = "";
     settings.passwd            = "";
     settings.elegooip          = "";
-    settings.activation_temp   = 70.0f;
+    settings.activation_temp   = 85.0f;
     settings.control_source    = "heater";
     settings.require_printing  = false;
     settings.target_temp       = 60.0f;
@@ -62,7 +62,7 @@ bool SettingsManager::load()
     settings.ssid              = doc["ssid"] | "";
     settings.passwd            = doc["passwd"] | "";
     settings.elegooip          = doc["elegooip"] | "";
-    settings.activation_temp   = doc["activation_temp"] | 70.0f;
+    settings.activation_temp   = doc["activation_temp"] | 85.0f;
     settings.control_source    = doc["control_source"] | "heater";
     settings.require_printing  = doc["require_printing"] | false;
     settings.target_temp       = doc["target_temp"] | 60.0f;
