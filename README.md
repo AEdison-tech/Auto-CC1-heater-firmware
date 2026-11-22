@@ -44,13 +44,15 @@ Pins can be overridden in `platformio.ini` via `build_flags`.
 
 ## Features
 
+- **Two printer profiles** — *Elegoo stock firmware* (SDCP, automatic activation) or *Klipper / COSMOS*, where the heater becomes a regular Klipper chamber heater (see [Klipper / COSMOS](#klipper--cosmos-profile))
 - **Automatic activation** — heater starts when the printer's bed temperature crosses a configurable threshold (optionally only during an active print)
-- **Temperature control source** — choose between the local DS18B20 sensor or the printer's reported chamber temperature (TempOfBox) for on/off control
+- **Temperature control source** — choose between the local DS18B20 sensor or the printer's chamber temperature (TempOfBox, or Klipper's chamber sensor) for on/off control
+- **Maximum chamber temperature** — any target (settings, slicer, Klipper) is limited to a configurable maximum (default 65 °C)
 - **Hysteresis control** — stable on/off switching around the target temperature using a configurable dead-band
 - **Fan cooldown** — fan runs for 30 seconds after the heater turns off to dissipate residual heat
 - **Wi-Fi provisioning** via [Improv Serial](https://www.improv-wifi.com/) or AP mode fallback
 - **Web interface** — responsive SPA (Solid.js + DaisyUI) served directly from the ESP32's LittleFS filesystem
-- **OTA firmware update** via [ElegantOTA](https://github.com/ayushsharma82/ElegantOTA)
+- **OTA firmware update** via [ElegantOTA](https://github.com/ayushsharma82/ElegantOTA) — settings are mirrored to NVS, so a filesystem (web UI) update no longer wipes them
 - **Debug mode** — override bed temp, heater temp, chamber temp, and printing state without a real printer
 - **mDNS** — accessible at `http://ccheater.local` on the local network
 
@@ -58,7 +60,7 @@ Pins can be overridden in `platformio.ini` via `build_flags`.
 
 ## How It Works
 
-### Activation
+### Activation (Elegoo stock firmware profile)
 
 1. The ESP32 connects to the Elegoo Centauri Carbon printer via WebSocket (port 3030).
 2. Every loop it reads `TempOfHotbed` (bed temperature) and printing state from the printer's SDCP status messages.
@@ -70,12 +72,25 @@ Pins can be overridden in `platformio.ini` via `build_flags`.
 
 Once activation conditions are met, the heater is controlled by hysteresis:
 
-- **Heater ON** when control temperature ≤ `target_temp − hysteresis`
-- **Heater OFF** when control temperature ≥ `target_temp + hysteresis`
+- After a new target (or when heating becomes allowed) the heater runs until the target is reached
+- Then: **Heater ON** when control temperature ≤ `target − hysteresis`, **Heater OFF** when control temperature ≥ `target + hysteresis`
 
 The **control temperature source** is configurable:
-- `Heater Temperature` — DS18B20 sensor mounted in the enclosure *(default)*
-- `Chamber Temperature` — `TempOfBox` reported by the printer
+- `Heater sensor` — DS18B20 sensor mounted in the enclosure *(default)*
+- `Printer chamber sensor` — `TempOfBox` reported by the stock firmware, or Klipper's `temperature_sensor chamber` in the Klipper profile
+
+### Klipper / COSMOS profile
+
+With the *Klipper / COSMOS* profile the heater no longer watches the printer by
+itself. The [`cc_heater` Klipper plugin](klipper/README.md) turns it into a
+regular Klipper heater (`[heater_generic chamber_heater]`):
+
+- live temperature and a settable target in **Fluidd / Mainsail** and on the printer display
+- `M141` / `M191` from the slicer: OrcaSlicer's chamber **Target** is heated to, the print starts at **Minimal** (wait limited to one hour)
+- `TURN_OFF_HEATERS`, `PRINT_END`, `CANCEL_PRINT` and the idle timeout switch it off
+- the plugin syncs once per second; the heater switches off after **10 s without contact**, and heater faults switch it off and **pause** the print
+
+Installation, OrcaSlicer setup and options: **[klipper/README.md](klipper/README.md)**.
 
 ---
 
@@ -118,6 +133,29 @@ Alternatively, use **Improv Serial** provisioning via the serial monitor right a
 
 ---
 
+## Klipper / COSMOS plugin installation (since version 1.1.0-beta.1)
+
+Short version for an Elegoo Centauri Carbon running [OpenCentauri COSMOS](https://docs.opencentauri.cc/klipper-conversion/cosmos/cosmos/). Details, OrcaSlicer setup and all options: [klipper/README.md](klipper/README.md).
+
+1. **Update the heater** to 1.1.0-beta.1 or newer (web UI → *Update*): upload `firmware.bin` first and let it reboot, then `littlefs.bin`. Starting with this version the settings are kept across the filesystem update.
+2. **Switch the profile:** heater web UI → *Settings* → *Printer Connection Profile* → **Klipper / COSMOS** → *Save* (the heater restarts). Reserve the heater's IP address in your router.
+3. **Upload the plugin** (from the release asset `cc_heater-klipper-plugin.zip` or the [`klipper/`](klipper) folder) in Fluidd → *Configuration*:
+   - create a folder `cc_heater` and upload `__init__.py` into it,
+   - upload `cc_heater.cfg` next to `printer.cfg` and set `host:` to the heater's IP address.
+4. **Link the plugin** once over SSH (`ssh root@<printer-ip>`):
+
+   ```sh
+   ln -s /etc/klipper/config/cc_heater /etc/klipper/plugins/cc_heater
+   ```
+
+5. **Enable it:** add `[include cc_heater.cfg]` to `printer.cfg` (below the COSMOS includes, above the `SAVE_CONFIG` block), then restart the Klipper service (Fluidd → power menu → *Services* → *klipper* → *Restart*).
+6. **Check:** `CC_HEATER_STATUS` in the console reports `connected` and Fluidd shows a `chamber_heater` card with a settable target.
+7. **Slicer:** add `M141` and the minimal chamber temperature to the OrcaSlicer start G-code — see [OrcaSlicer](klipper/README.md#orcaslicer).
+
+Optional: show the heater on the printer display — see step 5 in [klipper/README.md](klipper/README.md#installation-cosmos).
+
+---
+
 ## Web Interface
 
 | Page | Description |
@@ -137,16 +175,22 @@ All settings are stored in `/user_settings.json` on LittleFS and editable via th
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `printer_profile` | `"elegoo"` | `"elegoo"` (stock firmware, SDCP) or `"klipper"` (Klipper/COSMOS with the `cc_heater` plugin). Changing it restarts the heater |
 | `ssid` | — | Wi-Fi network name |
 | `passwd` | — | Wi-Fi password |
-| `elegooip` | — | Printer IP address |
-| `activation_temp` | `85.0` °C | Bed temperature threshold to allow heating |
-| `require_printing` | `false` | Require an active print for the heater to activate |
-| `control_source` | `"heater"` | Temperature source for on/off control: `"heater"` (DS18B20) or `"chamber"` (TempOfBox) |
-| `target_temp` | `60.0` °C | Desired enclosure temperature |
+| `elegooip` | — | Printer IP address *(Elegoo profile)* |
+| `activation_temp` | `85.0` °C | Bed temperature threshold to allow heating *(Elegoo profile)* |
+| `require_printing` | `false` | Require an active print for the heater to activate *(Elegoo profile)* |
+| `control_source` | `"heater"` | Temperature source for on/off control: `"heater"` (DS18B20) or `"chamber"` (printer chamber sensor) |
+| `target_temp` | `60.0` °C | Desired enclosure temperature *(Elegoo profile; Klipper sets the target in the Klipper profile)* |
+| `max_chamber_temp` | `65.0` °C | Upper limit for any target |
 | `hysteresis` | `5.0` °C | Dead-band around target (heater ON below target−hyst, OFF above target+hyst) |
 | `enabled` | `true` | Master enable/disable switch |
 | `debug` | `false` | Show the Debug page and enable temperature/state overrides |
+
+`POST /update_settings` only changes the keys present in the request body.
+
+The Klipper plugin talks to `POST /api/klipper/sync` (`{"target", "chamber_temp", "klippy", "seq"}` in, heater state out).
 
 ---
 

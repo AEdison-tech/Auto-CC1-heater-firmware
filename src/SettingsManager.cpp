@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include <Preferences.h>
 #include <stdlib.h>
 
 #include "Logger.h"
@@ -16,7 +17,9 @@ SettingsManager &SettingsManager::getInstance()
 SettingsManager::SettingsManager()
 {
     isLoaded             = false;
+    klipperProfile       = false;
     requestWifiReconnect = false;
+    requestRestart       = false;
     wifiChanged          = false;
     debugBedTemp         = 0.0f;
     debugHeaterTemp      = 0.0f;
@@ -35,29 +38,43 @@ SettingsManager::SettingsManager()
     settings.enabled           = true;
     settings.has_connected     = false;
     settings.debug             = false;
+    settings.printer_profile   = PROFILE_ELEGOO;
+    settings.max_chamber_temp  = 65.0f;
 }
 
-bool SettingsManager::load()
+// The settings JSON is mirrored into NVS so that a filesystem (LittleFS) OTA
+// update, which replaces /user_settings.json, does not wipe WiFi and heater
+// settings: when the file is missing on boot it is restored from this copy.
+String SettingsManager::loadBackup()
 {
-    File file = LittleFS.open("/user_settings.json", "r");
-    if (!file)
+    Preferences prefs;
+    if (!prefs.begin("cch", true))
+        return "";
+    String json = prefs.getString("settings", "");
+    prefs.end();
+    return json;
+}
+
+void SettingsManager::storeBackup(const String &json)
+{
+    Preferences prefs;
+    if (!prefs.begin("cch", false))
     {
-        logger.log("Settings file not found, using defaults");
-        isLoaded = true;
-        return false;
+        logger.log("Settings backup: NVS open failed");
+        return;
     }
-
-    StaticJsonDocument<1024> doc;
-    DeserializationError     error = deserializeJson(doc, file);
-    file.close();
-
-    if (error)
+    if (prefs.getString("settings", "") != json)
     {
-        logger.log("Settings JSON parsing error, using defaults");
-        isLoaded = true;
-        return false;
+        if (prefs.putString("settings", json) == 0)
+            logger.log("Settings backup: NVS write failed");
+        else
+            logger.log("Settings backup stored in NVS");
     }
+    prefs.end();
+}
 
+void SettingsManager::applyJson(JsonDocument &doc)
+{
     settings.ap_mode           = doc["ap_mode"] | true;
     settings.ssid              = doc["ssid"] | "";
     settings.passwd            = doc["passwd"] | "";
@@ -70,8 +87,47 @@ bool SettingsManager::load()
     settings.enabled           = doc["enabled"] | true;
     settings.has_connected     = doc["has_connected"] | false;
     settings.debug             = doc["debug"] | false;
+    settings.printer_profile   = doc["printer_profile"] | PROFILE_ELEGOO;
+    settings.max_chamber_temp  = doc["max_chamber_temp"] | 65.0f;
+    if (settings.printer_profile != PROFILE_KLIPPER)
+        settings.printer_profile = PROFILE_ELEGOO;
+    klipperProfile = settings.printer_profile == PROFILE_KLIPPER;
+}
 
+bool SettingsManager::load()
+{
+    StaticJsonDocument<1024> doc;
+
+    File file = LittleFS.open("/user_settings.json", "r");
+    if (!file)
+    {
+        String backup = loadBackup();
+        if (backup.length() > 0 && !deserializeJson(doc, backup))
+        {
+            applyJson(doc);
+            isLoaded = true;
+            logger.log("Settings file missing, restored from NVS backup");
+            save(true);
+            return true;
+        }
+        logger.log("Settings file not found, using defaults");
+        isLoaded = true;
+        return false;
+    }
+
+    DeserializationError error = deserializeJson(doc, file);
+    file.close();
+
+    if (error)
+    {
+        logger.log("Settings JSON parsing error, using defaults");
+        isLoaded = true;
+        return false;
+    }
+
+    applyJson(doc);
     isLoaded = true;
+    storeBackup(toJson(true));
     return true;
 }
 
@@ -95,6 +151,7 @@ bool SettingsManager::save(bool skipWifiCheck)
 
     file.close();
     logger.log("Settings saved");
+    storeBackup(output);
 
     if (!skipWifiCheck && wifiChanged)
     {
@@ -123,6 +180,9 @@ float  SettingsManager::getHysteresis()  { return getSettings().hysteresis; }
 bool   SettingsManager::getEnabled()     { return getSettings().enabled; }
 bool   SettingsManager::getHasConnected(){ return getSettings().has_connected; }
 bool   SettingsManager::getDebug()       { return getSettings().debug; }
+String SettingsManager::getPrinterProfile()      { return getSettings().printer_profile; }
+bool   SettingsManager::isKlipperProfile() const { return klipperProfile; }
+float  SettingsManager::getMaxChamberTemp()      { return getSettings().max_chamber_temp; }
 
 void SettingsManager::setSSID(const String &ssid)
 {
@@ -196,6 +256,19 @@ void SettingsManager::setDebug(bool debug)
     settings.debug = debug;
 }
 
+void SettingsManager::setPrinterProfile(const String &profile)
+{
+    if (!isLoaded) load();
+    settings.printer_profile = profile == PROFILE_KLIPPER ? PROFILE_KLIPPER : PROFILE_ELEGOO;
+    klipperProfile           = settings.printer_profile == PROFILE_KLIPPER;
+}
+
+void SettingsManager::setMaxChamberTemp(float temp)
+{
+    if (!isLoaded) load();
+    settings.max_chamber_temp = constrain(temp, 20.0f, 80.0f);
+}
+
 String SettingsManager::toJson(bool includePassword)
 {
     String                   output;
@@ -212,6 +285,8 @@ String SettingsManager::toJson(bool includePassword)
     doc["enabled"]           = settings.enabled;
     doc["has_connected"]     = settings.has_connected;
     doc["debug"]             = settings.debug;
+    doc["printer_profile"]   = settings.printer_profile;
+    doc["max_chamber_temp"]  = settings.max_chamber_temp;
 
     if (includePassword)
     {

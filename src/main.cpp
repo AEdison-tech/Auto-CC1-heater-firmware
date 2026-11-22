@@ -4,6 +4,7 @@
 
 #include "ElegooCC.h"
 #include "HeaterController.h"
+#include "KlipperLink.h"
 #include "LittleFS.h"
 #include "Logger.h"
 #include "SettingsManager.h"
@@ -26,6 +27,8 @@ const char *chipFamily      = CHIP_FAMILY_RAW;
 #define WIFI_CHECK_INTERVAL    30000UL
 #define WIFI_RECONNECT_TIMEOUT 10000UL
 #define NTP_SYNC_INTERVAL      3600000UL
+#define RESTART_DELAY_MS       1000UL
+#define OVERTEMP_MARGIN        10.0f  // control temp this far above the max target = fault
 
 const char *ntpServer = "pool.ntp.org";
 
@@ -44,6 +47,8 @@ uint8_t x_buffer[16];
 uint8_t x_position = 0;
 
 unsigned long lastNTPSyncAttempt = 0;
+unsigned long restartRequestedAt = 0;
+bool          wasKlipperLinked   = false;
 
 void failWifi()
 {
@@ -335,6 +340,96 @@ bool handleImprovWifi()
     return false;
 }
 
+// ---- heater control ----
+
+// Profile "elegoo": stock Elegoo firmware, status via SDCP WebSocket. Heating is
+// allowed once the bed reaches the activation temperature (optionally only while
+// printing); the target comes from the heater settings.
+void elegooHeaterControl()
+{
+    bool  isPrinting  = false;
+    float bedTemp     = 0.0f;
+    float chamberTemp = NAN;
+
+    bool requirePrinting   = settingsManager.getRequirePrinting();
+    bool useChamberControl = settingsManager.getControlSource() == "chamber";
+
+    if (settingsManager.getDebug())
+    {
+        isPrinting  = (!requirePrinting || settingsManager.debugIsPrinting) && settingsManager.getEnabled();
+        bedTemp     = settingsManager.debugBedTemp;
+        chamberTemp = settingsManager.debugChamberTemp;
+    }
+    else if (isElegooSetup)
+    {
+        printer_info_t info = elegooCC.getCurrentInformation();
+        isPrinting  = (!requirePrinting || info.isPrinting) && settingsManager.getEnabled();
+        bedTemp     = info.bedTemp;
+        chamberTemp = info.chamberTemp;
+    }
+
+    float controlTemp = useChamberControl ? chamberTemp : heaterController.getHeaterTemp();
+    bool  sensorOk    = useChamberControl || heaterController.getSensorState() != SENSOR_FAILED;
+    float targetTemp  = min(settingsManager.getTargetTemp(), settingsManager.getMaxChamberTemp());
+    bool  allow = isPrinting && bedTemp >= settingsManager.getActivationTemp() && sensorOk;
+
+    heaterController.loop(allow, controlTemp, targetTemp, settingsManager.getHysteresis());
+}
+
+// Profile "klipper": Klipper/COSMOS with the cc_heater plugin. The plugin owns the
+// target (M141/M191, Fluidd, display, TURN_OFF_HEATERS) and sends it once per
+// second; we regulate around it and switch off when the link goes quiet.
+void klipperHeaterControl()
+{
+    klipper_info_t k = klipperLink.getInfo();
+
+    if (k.linked != wasKlipperLinked)
+    {
+        logger.log(k.linked ? "Klipper link established" : "Klipper link lost");
+        wasKlipperLinked = k.linked;
+    }
+
+    bool  useChamber = settingsManager.getControlSource() == "chamber";
+    float maxTemp    = settingsManager.getMaxChamberTemp();
+    float target     = min(k.target, maxTemp);
+    float chamber    = settingsManager.getDebug() ? settingsManager.debugChamberTemp : k.chamberTemp;
+
+    float          controlTemp = NAN;
+    sensor_state_t sensor      = SENSOR_PENDING;
+    if (useChamber)
+    {
+        if (k.linked && !isnan(chamber))
+        {
+            controlTemp = chamber;
+            sensor      = SENSOR_OK;
+        }
+        else if (k.linked)
+        {
+            sensor = SENSOR_FAILED;
+        }
+    }
+    else
+    {
+        sensor = heaterController.getSensorState();
+        if (sensor == SENSOR_OK)
+            controlTemp = heaterController.getHeaterTemp();
+    }
+
+    const char *fault = "";
+    if (!settingsManager.getEnabled())
+        fault = "disabled";
+    else if (target > 0.0f && sensor == SENSOR_FAILED)
+        fault = "sensor";
+    else if (!isnan(controlTemp) && controlTemp > maxTemp + OVERTEMP_MARGIN)
+        fault = "overtemp";
+
+    bool allow = fault[0] == '\0' && k.linked && k.klippyReady && target > 0.0f &&
+                 sensor == SENSOR_OK;
+
+    klipperLink.publish(controlTemp, fault);
+    heaterController.loop(allow, controlTemp, target, settingsManager.getHysteresis());
+}
+
 // ---- main loop ----
 
 void loop()
@@ -365,15 +460,29 @@ void loop()
         reconnectWifiWithNewCredentials();
     }
 
+    if (settingsManager.requestRestart)
+    {
+        settingsManager.requestRestart = false;
+        restartRequestedAt             = currentTime;
+        logger.log("Printer profile changed, restarting");
+    }
+    if (restartRequestedAt > 0 && currentTime - restartRequestedAt >= RESTART_DELAY_MS)
+    {
+        ESP.restart();
+    }
+
     if (isWifiConnected)
     {
-        if (!isElegooSetup)
+        // The stock-firmware (SDCP) client only runs in the Elegoo profile; in the
+        // Klipper profile the cc_heater plugin calls us instead.
+        if (!isElegooSetup && !settingsManager.isKlipperProfile())
         {
             elegooCC.setup();
             logger.log("Elegoo CC connected");
             isElegooSetup = true;
         }
-        elegooCC.loop();
+        if (isElegooSetup)
+            elegooCC.loop();
 
         if (!isNtpSetup)
         {
@@ -393,32 +502,11 @@ void loop()
     }
 
     // Heater control — runs every loop regardless of WiFi state
-    {
-        bool  isPrinting  = false;
-        float bedTemp     = 0.0f;
-        float controlTemp = NAN;
-
-        bool requirePrinting    = settingsManager.getRequirePrinting();
-        bool useChamberControl  = settingsManager.getControlSource() == "chamber";
-
-        if (settingsManager.getDebug())
-        {
-            isPrinting  = (!requirePrinting || settingsManager.debugIsPrinting) && settingsManager.getEnabled();
-            bedTemp     = settingsManager.debugBedTemp;
-            controlTemp = useChamberControl ? settingsManager.debugChamberTemp : NAN;
-        }
-        else if (isElegooSetup)
-        {
-            printer_info_t info = elegooCC.getCurrentInformation();
-            isPrinting   = (!requirePrinting || info.isPrinting) && settingsManager.getEnabled();
-            bedTemp      = info.bedTemp;
-            controlTemp  = useChamberControl ? info.chamberTemp : NAN;
-        }
-
-        heaterController.loop(isPrinting, bedTemp, settingsManager.getActivationTemp(),
-                               controlTemp, settingsManager.getTargetTemp(),
-                               settingsManager.getHysteresis());
-    }
+    heaterController.updateSensor();
+    if (settingsManager.isKlipperProfile())
+        klipperHeaterControl();
+    else
+        elegooHeaterControl();
 
     webServer.loop();
 }

@@ -18,7 +18,13 @@ struct user_settings
     bool   enabled;
     bool   has_connected;
     bool   debug;
+    String printer_profile;      // "elegoo" (stock firmware, SDCP) or "klipper" (Klipper/COSMOS plugin)
+    float  max_chamber_temp;     // upper limit for any heater target (°C)
 };
+
+#define PROFILE_ELEGOO  "elegoo"
+#define PROFILE_KLIPPER "klipper"
+
 
 class SettingsManager
 {
@@ -27,7 +33,12 @@ class SettingsManager
     bool          isLoaded;
     bool          wifiChanged;
 
+    volatile bool klipperProfile;  // cached for the async web server task
+
     SettingsManager();
+    void   applyJson(JsonDocument &doc);
+    String loadBackup();
+    void   storeBackup(const String &json);
     SettingsManager(const SettingsManager &)            = delete;
     SettingsManager &operator=(const SettingsManager &) = delete;
 
@@ -35,6 +46,7 @@ class SettingsManager
     static SettingsManager &getInstance();
 
     bool  requestWifiReconnect;
+    bool  requestRestart;
     float debugBedTemp;
     float debugHeaterTemp;
     float debugChamberTemp;
@@ -57,6 +69,9 @@ class SettingsManager
     bool   getEnabled();
     bool   getHasConnected();
     bool   getDebug();
+    String getPrinterProfile();
+    bool   isKlipperProfile() const;
+    float  getMaxChamberTemp();
 
     void setSSID(const String &ssid);
     void setPassword(const String &password);
@@ -70,6 +85,8 @@ class SettingsManager
     void setEnabled(bool enabled);
     void setHasConnected(bool hasConnected);
     void setDebug(bool debug);
+    void setPrinterProfile(const String &profile);
+    void setMaxChamberTemp(float temp);
 
     String toJson(bool includePassword = true);
 };

@@ -10,5 +10,7 @@
   "hysteresis": 5.0,
   "enabled": true,
   "has_connected": false,
-  "debug": false
+  "debug": false,
+  "printer_profile": "elegoo",
+  "max_chamber_temp": 65.0
 }

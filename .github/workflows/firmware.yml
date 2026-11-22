@@ -57,6 +57,10 @@ jobs:
         run: pip install --upgrade platformio
 
       - name: Build firmware (esp32-c3)
+        env:
+          # Release builds report the release tag as firmware version (About
+          # page, Klipper plugin); other builds report "dev".
+          PLATFORMIO_BUILD_FLAGS: ${{ github.event_name == 'release' && format('-D FIRMWARE_VERSION_RAW=\"{0}\"', github.event.release.tag_name) || '' }}
         run: pio run -e esp32-c3
 
       - name: Upload build artifacts

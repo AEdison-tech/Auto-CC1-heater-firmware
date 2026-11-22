@@ -12,6 +12,10 @@ function Settings() {
   const [hysteresis, setHysteresis] = createSignal(5.0)
   const [enabled, setEnabled] = createSignal(true)
   const [debug, setDebug] = createSignal(false)
+  const [printerProfile, setPrinterProfile] = createSignal('elegoo')
+  const [savedProfile, setSavedProfile] = createSignal('elegoo')
+  const [maxChamberTemp, setMaxChamberTemp] = createSignal(65.0)
+  const [restarting, setRestarting] = createSignal(false)
   const [apMode, setApMode] = createSignal<boolean | null>(null)
   const [loading, setLoading] = createSignal(true)
   const [error, setError] = createSignal('')
@@ -36,6 +40,9 @@ function Settings() {
       setApMode(s.ap_mode ?? false)
       setDebug(s.debug ?? false)
       setDebugMode(s.debug ?? false)
+      setPrinterProfile(s.printer_profile ?? 'elegoo')
+      setSavedProfile(s.printer_profile ?? 'elegoo')
+      setMaxChamberTemp(s.max_chamber_temp ?? 65.0)
       setError('')
     } catch (err: any) {
       setError(`Error loading settings: ${err.message}`)
@@ -61,6 +68,8 @@ function Settings() {
         hysteresis: hysteresis(),
         enabled: enabled(),
         debug: debug(),
+        printer_profile: printerProfile(),
+        max_chamber_temp: maxChamberTemp(),
       }
 
       const res = await fetch('/update_settings', {
@@ -71,6 +80,11 @@ function Settings() {
 
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
       setDebugMode(debug())
+      if ((await res.text()) === 'restarting') {
+        setRestarting(true)
+        setTimeout(() => window.location.reload(), 8000)
+        return
+      }
       setSaveSuccess(true)
       setTimeout(() => setSaveSuccess(false), 3000)
     } catch (err: any) {
@@ -89,6 +103,11 @@ function Settings() {
           )}
           {saveSuccess() && (
             <div role="alert" class="mb-4 alert alert-success">Settings saved!</div>
+          )}
+          {restarting() && (
+            <div role="alert" class="mb-4 alert alert-info">
+              Printer profile changed — the heater is restarting, this page reloads in a few seconds.
+            </div>
           )}
 
           {/* WiFi */}
@@ -127,15 +146,48 @@ function Settings() {
           <h2 class="text-lg font-bold mb-4 mt-10">Printer</h2>
 
           <fieldset class="fieldset">
-            <legend class="fieldset-legend">Elegoo Centauri Carbon IP Address</legend>
-            <input type="text" class="input" value={elegooip()}
-              onInput={(e) => setElegooip(e.target.value)}
-              placeholder="xxx.xxx.xxx.xxx" />
+            <legend class="fieldset-legend">Printer Connection Profile</legend>
+            <select class="select" value={printerProfile()}
+              onChange={(e) => {
+                const profile = e.target.value
+                setPrinterProfile(profile)
+                // Klipper's M191 waits on the printer chamber sensor, so regulate on it by default
+                if (profile === 'klipper' && profile !== savedProfile()) setControlSource('chamber')
+              }}>
+              <option value="elegoo">Elegoo stock firmware (SDCP)</option>
+              <option value="klipper">Klipper / COSMOS (cc_heater plugin)</option>
+            </select>
+            <p class="label">
+              {printerProfile() === 'klipper'
+                ? 'Klipper controls the heater: target from the slicer (M141/M191), Fluidd or the printer display.'
+                : 'The heater watches the stock firmware and starts once the bed reaches the activation temperature.'}
+            </p>
+            {printerProfile() !== savedProfile() && (
+              <p class="label text-warning">Saving restarts the heater.</p>
+            )}
           </fieldset>
+
+          {printerProfile() === 'elegoo' ? (
+            <fieldset class="fieldset">
+              <legend class="fieldset-legend">Elegoo Centauri Carbon IP Address</legend>
+              <input type="text" class="input" value={elegooip()}
+                onInput={(e) => setElegooip(e.target.value)}
+                placeholder="xxx.xxx.xxx.xxx" />
+            </fieldset>
+          ) : (
+            <div role="alert" class="mt-2 alert alert-info alert-soft">
+              <span>
+                Requires the <strong>cc_heater</strong> plugin in Klipper with{' '}
+                <code>host:</code> set to this heater's IP address. The heater switches off when
+                Klipper has not contacted it for 10 seconds.
+              </span>
+            </div>
+          )}
 
           {/* Heater */}
           <h2 class="text-lg font-bold mb-4 mt-10">Heater Settings</h2>
 
+          {printerProfile() === 'elegoo' && (<>
           <fieldset class="fieldset">
             <legend class="fieldset-legend">Activation Temperature (°C)</legend>
             <input type="number" class="input" value={activationTemp()}
@@ -153,23 +205,34 @@ function Settings() {
               <span class="label-text">When checked, heater activates only during an active print. When unchecked, heater activates based on temperature alone.</span>
             </label>
           </fieldset>
+          </>)}
 
           <fieldset class="fieldset">
             <legend class="fieldset-legend">Temperature Control Source</legend>
             <select class="select" value={controlSource()}
               onChange={(e) => setControlSource(e.target.value)}>
-              <option value="heater">Heater Temperature</option>
-              <option value="chamber">Chamber Temperature</option>
+              <option value="heater">Heater sensor (DS18B20)</option>
+              <option value="chamber">Printer chamber sensor</option>
             </select>
             <p class="label">Which temperature is compared against the target to control the heater on/off.</p>
           </fieldset>
 
+          {printerProfile() === 'elegoo' && (
+            <fieldset class="fieldset">
+              <legend class="fieldset-legend">Target Box Temperature (°C)</legend>
+              <input type="number" class="input" value={targetTemp()}
+                onInput={(e) => setTargetTemp(parseFloat(e.target.value) || 35)}
+                min="0" max="80" step="0.5" />
+              <p class="label">Desired temperature inside the enclosure.</p>
+            </fieldset>
+          )}
+
           <fieldset class="fieldset">
-            <legend class="fieldset-legend">Target Box Temperature (°C)</legend>
-            <input type="number" class="input" value={targetTemp()}
-              onInput={(e) => setTargetTemp(parseFloat(e.target.value) || 35)}
-              min="0" max="80" step="0.5" />
-            <p class="label">Desired temperature inside the enclosure.</p>
+            <legend class="fieldset-legend">Maximum Chamber Temperature (°C)</legend>
+            <input type="number" class="input" value={maxChamberTemp()}
+              onInput={(e) => setMaxChamberTemp(parseFloat(e.target.value) || 65)}
+              min="20" max="80" step="1" />
+            <p class="label">Any higher target (slicer, Klipper or the field above) is limited to this value.</p>
           </fieldset>
 
           <fieldset class="fieldset">
@@ -178,8 +241,13 @@ function Settings() {
               onInput={(e) => setHysteresis(parseFloat(e.target.value) || 2)}
               min="0.5" max="10" step="0.5" />
             <p class="label">
-              Heater turns ON below <strong>{(targetTemp() - hysteresis()).toFixed(1)} °C</strong>,
-              turns OFF above <strong>{(targetTemp() + hysteresis()).toFixed(1)} °C</strong>.
+              {printerProfile() === 'klipper' ? (
+                <>Heater turns ON below <strong>target − {hysteresis().toFixed(1)} °C</strong>,
+                  turns OFF above <strong>target + {hysteresis().toFixed(1)} °C</strong>.</>
+              ) : (
+                <>Heater turns ON below <strong>{(targetTemp() - hysteresis()).toFixed(1)} °C</strong>,
+                  turns OFF above <strong>{(targetTemp() + hysteresis()).toFixed(1)} °C</strong>.</>
+              )}
             </p>
           </fieldset>
 

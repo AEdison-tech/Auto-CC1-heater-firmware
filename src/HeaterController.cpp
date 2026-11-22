@@ -21,7 +21,11 @@ HeaterController::HeaterController()
       heaterTemp(0.0f),
       oneWire(TEMP_SENSOR_PIN),
       sensors(&oneWire),
-      lastTempRequest(0)
+      lastTempRequest(0),
+      lastValidTemp(0),
+      heatingAllowed(false),
+      targetReached(false),
+      lastTarget(NAN)
 {
 }
 
@@ -90,55 +94,84 @@ void HeaterController::updateLed()
     }
 }
 
-float HeaterController::readHeaterTemp()
+void HeaterController::updateSensor()
 {
     if (settingsManager.getDebug())
-        return settingsManager.debugHeaterTemp;
+    {
+        heaterTemp    = settingsManager.debugHeaterTemp;
+        lastValidTemp = millis();
+        return;
+    }
 
     unsigned long now = millis();
     if (now - lastTempRequest >= TEMP_CONVERSION_MS)
     {
         float t = sensors.getTempCByIndex(0);
         if (t != DEVICE_DISCONNECTED_C)
-            heaterTemp = t;
+        {
+            heaterTemp    = t;
+            lastValidTemp = now;
+        }
         sensors.requestTemperatures();
         lastTempRequest = now;
     }
-    return heaterTemp;
 }
 
-void HeaterController::loop(bool isPrinting, float printerTemp, float activationTemp,
-                             float controlTemp, float targetTemp, float hysteresis)
+sensor_state_t HeaterController::getSensorState() const
 {
-    heaterTemp = readHeaterTemp();
+    if (settingsManager.getDebug())
+        return SENSOR_OK;
+    unsigned long now = millis();
+    if (lastValidTemp == 0)
+        return now < SENSOR_STALE_MS ? SENSOR_PENDING : SENSOR_FAILED;
+    return now - lastValidTemp <= SENSOR_STALE_MS ? SENSOR_OK : SENSOR_FAILED;
+}
 
-    float effectiveTemp = isnan(controlTemp) ? heaterTemp : controlTemp;
-
-    bool conditionsMet = isPrinting && (printerTemp >= activationTemp);
-
-    if (conditionsMet)
+void HeaterController::loop(bool allowHeating, float controlTemp, float targetTemp,
+                             float hysteresis)
+{
+    if (allowHeating && !isnan(controlTemp))
     {
-        if (!heaterActive && effectiveTemp <= targetTemp - hysteresis)
+        // A new target (or heating just allowed) first heats up to the target;
+        // the hysteresis band only applies once the target has been reached.
+        // Otherwise a chamber starting inside the band would never be heated
+        // and a wait for the target (M191) could stall.
+        if (!heatingAllowed || targetTemp != lastTarget)
         {
-            logger.logf("Heater ON: %.1fC < %.1fC (target-hyst)", effectiveTemp,
-                        targetTemp - hysteresis);
+            heatingAllowed = true;
+            lastTarget     = targetTemp;
+            targetReached  = false;
+        }
+        if (controlTemp >= targetTemp)
+            targetReached = true;
+
+        bool belowBand = controlTemp <= targetTemp - hysteresis;
+        bool approach  = !targetReached && controlTemp < targetTemp;
+        if (!heaterActive && (belowBand || approach))
+        {
+            logger.logf("Heater ON: %.1fC, target %.1fC (%s)", controlTemp, targetTemp,
+                        belowBand ? "below target-hyst" : "heating up to target");
             setRelay(true);
             setFan(true);
             fanCooldownStart = 0;
         }
-        else if (heaterActive && effectiveTemp >= targetTemp + hysteresis)
+        else if (heaterActive && controlTemp >= targetTemp + hysteresis)
         {
-            logger.logf("Heater OFF: %.1fC >= %.1fC (target+hyst)", effectiveTemp,
+            logger.logf("Heater OFF: %.1fC >= %.1fC (target+hyst)", controlTemp,
                         targetTemp + hysteresis);
             setRelay(false);
             fanCooldownStart = millis();
         }
     }
-    else if (heaterActive)
+    else
     {
-        logger.log("Heater OFF: print ended or printer temp below activation threshold");
-        setRelay(false);
-        fanCooldownStart = millis();
+        heatingAllowed = false;
+        if (heaterActive)
+        {
+            logger.log("Heater OFF: heating no longer allowed");
+            setRelay(false);
+            fanCooldownStart = millis();
+        }
     }
 
     // Fan cooldown — runs 30s after heater turns off
