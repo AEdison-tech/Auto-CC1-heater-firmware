@@ -17,10 +17,14 @@
 # All network I/O runs on a background thread; the Klipper reactor never
 # blocks on the heater.
 #
+# A "*.local" host name is resolved by this module with a one-shot mDNS query
+# (hosts like COSMOS have no system mDNS resolver) and looked up again when
+# the heater stops answering, e.g. after it got a new address from DHCP.
+#
 # Example configuration (order matters: [cc_heater] before the heater):
 #
 #   [cc_heater]
-#   host: 192.168.0.214
+#   host: ccheater.local
 #
 #   [heater_generic chamber_heater]
 #   heater_pin: cc_heater:pwm
@@ -37,11 +41,20 @@
 import http.client
 import json
 import logging
+import random
+import socket
+import struct
 import threading
+import time
 
 API_PATH = "/api/klipper/sync"
 REPORT_TIME = 1.0
 PROMPT_MACRO = "gcode_macro _SHOW_PROMPT"
+
+MDNS_GROUP = ("224.0.0.251", 5353)
+MDNS_RETRY_FAILURES = 2   # failed requests before a .local name is looked up again
+MDNS_RETRY_INTERVAL = 5.  # seconds between mDNS lookups while it does not answer,
+MDNS_RETRY_MAX = 30.      # doubling up to this; a new target retries immediately
 
 # Device-reported faults that stop the heater and trigger fault_action.
 DEVICE_FAULTS = {
@@ -64,7 +77,14 @@ class CCHeater:
         self.reactor = self.printer.get_reactor()
         self.gcode = self.printer.lookup_object("gcode")
 
-        self.host = config.get("host")
+        self.host = config.get("host").strip()
+        self._mdns_name = None
+        if self.host.lower().rstrip(".").endswith(".local"):
+            self._mdns_name = self.host.lower().rstrip(".")
+            try:
+                _dns_query(self._mdns_name, 0)
+            except ValueError as e:
+                raise config.error("cc_heater: %s" % (e,))
         self.port = config.getint("port", 80, minval=1, maxval=65535)
         self.heater_name = config.get("heater", "chamber_heater")
         self.chamber_sensor_name = config.get(
@@ -91,7 +111,10 @@ class CCHeater:
         self._reply = None
         self._reply_count = 0
         self._last_error = None
+        self._address = None if self._mdns_name else self.host
         self._thread = None
+        self._resolve_time = None  # network thread only
+        self._resolve_interval = MDNS_RETRY_INTERVAL
 
         # Reactor-side state
         self._heater = None
@@ -105,6 +128,7 @@ class CCHeater:
         self._last_ok_time = None
         self._start_time = 0.
         self._was_linked = None
+        self._label = self.host
         self._fresh_time = max(3., 2. * self.sync_interval
                                + self.request_timeout)
         self._target = 0.
@@ -191,8 +215,9 @@ class CCHeater:
             target=self._run, name="cc_heater", daemon=True)
         self._thread.start()
         self.reactor.update_timer(self._timer, self.reactor.NOW)
-        logger.info("cc_heater: controlling heater at %s:%d",
-                    self.host, self.port)
+        logger.info("cc_heater: controlling heater at %s:%d%s",
+                    self.host, self.port,
+                    " (resolved via mDNS)" if self._mdns_name else "")
 
     def _handle_ready(self):
         self._ready = True
@@ -320,6 +345,8 @@ class CCHeater:
             reply = self._reply
             count = self._reply_count
             error = self._last_error
+            address = self._address
+        self._label = self._host_label(address)
 
         if count != self._seen_reply_count:
             self._seen_reply_count = count
@@ -343,9 +370,14 @@ class CCHeater:
                 self._mcu.estimated_print_time(eventtime), temp)
 
         self._report_link_change(eventtime, linked, error)
-        self._status = self._build_status(reply, linked, error)
+        self._status = self._build_status(reply, linked, error, address)
         self._check_faults(eventtime, linked, reply, error)
         return eventtime + self.sync_interval
+
+    def _host_label(self, address):
+        if address and address != self.host:
+            return "%s, %s" % (self.host, address)
+        return self.host
 
     def _report_link_change(self, eventtime, linked, error):
         if linked == self._was_linked:
@@ -358,11 +390,11 @@ class CCHeater:
         if linked:
             if previous is not None:  # stay quiet on a normal startup
                 self.gcode.respond_info(
-                    "Chamber heater connected (%s)" % (self.host,))
+                    "Chamber heater connected (%s)" % (self._label,))
         else:
             self.gcode.respond_info(
                 "Chamber heater offline (%s): %s"
-                % (self.host, error or "no reply"))
+                % (self._label, error or "no reply"))
 
     def _check_faults(self, eventtime, linked, reply, error):
         if self._target <= 0. or self._fault_latched:
@@ -374,7 +406,7 @@ class CCHeater:
             if eventtime - since > self.link_timeout:
                 self._raise_fault(
                     eventtime, "no response from the heater at %s (%s)"
-                    % (self.host, error or "timeout"))
+                    % (self._label, error or "timeout"))
             return
         device_fault = (reply or {}).get("fault") or ""
         if device_fault in DEVICE_FAULTS:
@@ -429,11 +461,12 @@ class CCHeater:
             except Exception:
                 logger.exception("cc_heater: unable to show prompt")
 
-    def _build_status(self, reply, linked, error):
+    def _build_status(self, reply, linked, error, address=None):
         reply = reply if (linked and reply is not None) else {}
         return {
             "connected": bool(linked),
             "host": self.host,
+            "address": address or "",
             "heating": bool(reply.get("heating", False)),
             "fan": bool(reply.get("fan", False)),
             "fault": self._fault,
@@ -457,22 +490,29 @@ class CCHeater:
     def _run(self):
         seq = 0
         failing = False
+        failures = 0
+        last_target = 0.
         while not self._stop.is_set():
             self._wake.clear()
             with self._lock:
                 body = dict(self._request)
             seq += 1
             body["seq"] = seq
+            new_target = body["target"] > 0. and body["target"] != last_target
+            last_target = body["target"]
             try:
-                reply = self._post(body)
+                reply = self._post(
+                    self._get_address(failures, new_target), body)
                 with self._lock:
                     self._reply = reply
                     self._reply_count += 1
                     self._last_error = None
+                failures = 0
                 if failing:
                     logger.info("cc_heater: link to %s restored", self.host)
                     failing = False
             except Exception as e:
+                failures += 1
                 with self._lock:
                     self._last_error = str(e) or e.__class__.__name__
                 if not failing:
@@ -482,9 +522,37 @@ class CCHeater:
             self._sent.set()
             self._wake.wait(self.sync_interval)
 
-    def _post(self, body):
+    def _get_address(self, failures, retry_now=False):
+        """Address for the next request (network thread). A .local name is
+        looked up via mDNS at startup and again once the heater stops
+        answering; until a new answer arrives the last address is kept."""
+        if self._mdns_name is None:
+            return self.host
+        address = self._address
+        if address is not None and failures < MDNS_RETRY_FAILURES:
+            return address
+        now = time.monotonic()
+        if (retry_now or self._resolve_time is None
+                or now - self._resolve_time >= self._resolve_interval):
+            self._resolve_time = now
+            found = mdns_resolve(self._mdns_name, self.request_timeout)
+            if found is None:
+                self._resolve_interval = min(2. * self._resolve_interval,
+                                             MDNS_RETRY_MAX)
+            else:
+                self._resolve_interval = MDNS_RETRY_INTERVAL
+            if found is not None and found != address:
+                logger.info("cc_heater: %s resolved to %s", self.host, found)
+                address = found
+                with self._lock:
+                    self._address = found
+        if address is None:
+            raise RuntimeError("%s not found (no mDNS answer)" % (self.host,))
+        return address
+
+    def _post(self, address, body):
         conn = http.client.HTTPConnection(
-            self.host, self.port, timeout=self.request_timeout)
+            address, self.port, timeout=self.request_timeout)
         try:
             conn.request("POST", API_PATH, json.dumps(body),
                          {"Content-Type": "application/json",
@@ -586,8 +654,11 @@ class CCHeater:
 
     def cmd_CC_HEATER_STATUS(self, gcmd):
         s = self._status
+        where = self.host
+        if s["address"] and s["address"] != self.host:
+            where = "%s (%s)" % (self.host, s["address"])
         lines = ["Chamber heater @ %s: %s" % (
-            self.host, "connected" if s["connected"] else "NOT connected")]
+            where, "connected" if s["connected"] else "NOT connected")]
         if s["connected"]:
             lines.append("source=%s heating=%s fan=%s device_target=%s "
                          "heater_temp=%s chamber_temp=%s fw=%s"
@@ -662,6 +733,101 @@ def _as_float(value):
 
 def _fmt(value):
     return "-" if value is None else "%.1f" % (value,)
+
+
+# ----------------------------------------------------------------------
+# Minimal mDNS client
+# ----------------------------------------------------------------------
+
+def mdns_resolve(name, timeout):
+    """Resolve a .local host name to an IPv4 address, or return None.
+
+    Sends a one-shot multicast DNS query from an ephemeral port (RFC 6762,
+    section 5.1); the responder answers by unicast to that port, so neither
+    port 5353 nor a system mDNS service is needed. The query is repeated
+    three times within the timeout.
+    """
+    name = name.rstrip(".").lower()
+    packet = _dns_query(name, random.randint(1, 0xFFFF))
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
+        sock.bind(("", 0))
+        deadline = time.monotonic() + timeout
+        resend = 0.
+        while True:
+            now = time.monotonic()
+            if now >= deadline:
+                return None
+            if now >= resend:
+                sock.sendto(packet, MDNS_GROUP)
+                resend = now + max(timeout / 3., .2)
+            sock.settimeout(max(min(deadline, resend) - now, .01))
+            try:
+                data = sock.recvfrom(4096)[0]
+            except socket.timeout:
+                continue
+            try:
+                address = _dns_find_a(data, name)
+            except (IndexError, ValueError, struct.error):
+                continue  # malformed packet
+            if address is not None:
+                return address
+    finally:
+        sock.close()
+
+
+def _dns_query(name, qid):
+    qname = b""
+    for label in name.split("."):
+        try:
+            raw = label.encode("ascii")
+        except UnicodeError:
+            raise ValueError("invalid host name '%s'" % (name,))
+        if not 0 < len(raw) < 64:
+            raise ValueError("invalid host name '%s'" % (name,))
+        qname += struct.pack("B", len(raw)) + raw
+    # Standard query, one question: <name> type A, class IN
+    return (struct.pack("!6H", qid, 0, 1, 0, 0, 0) + qname + b"\0"
+            + struct.pack("!HH", 1, 1))
+
+
+def _dns_read_name(data, offset):
+    labels = []
+    end = None
+    for _ in range(128):
+        length = data[offset]
+        if length & 0xC0 == 0xC0:  # compression pointer
+            if end is None:
+                end = offset + 2
+            offset = ((length & 0x3F) << 8) | data[offset + 1]
+            continue
+        offset += 1
+        if length == 0:
+            return ".".join(labels), (offset if end is None else end)
+        labels.append(data[offset:offset + length].decode(
+            "ascii", "replace").lower())
+        offset += length
+    raise ValueError("name too long")
+
+
+def _dns_find_a(data, name):
+    flags, qdcount, ancount, nscount, arcount = struct.unpack_from(
+        "!5H", data, 2)
+    if not flags & 0x8000:
+        return None  # a query, not a response
+    offset = 12
+    for _ in range(qdcount):
+        offset = _dns_read_name(data, offset)[1] + 4
+    for _ in range(ancount + nscount + arcount):
+        rname, offset = _dns_read_name(data, offset)
+        rtype, _rclass, _ttl, rdlength = struct.unpack_from(
+            "!HHIH", data, offset)
+        offset += 10
+        if rtype == 1 and rdlength == 4 and rname == name:
+            return socket.inet_ntoa(data[offset:offset + 4])
+        offset += rdlength
+    return None
 
 
 def load_config(config):

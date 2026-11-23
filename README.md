@@ -138,10 +138,10 @@ Alternatively, use **Improv Serial** provisioning via the serial monitor right a
 Short version for an Elegoo Centauri Carbon running [OpenCentauri COSMOS](https://docs.opencentauri.cc/klipper-conversion/cosmos/cosmos/). Details, OrcaSlicer setup and all options: [klipper/README.md](klipper/README.md).
 
 1. **Update the heater** to 1.1.0-beta.1 or newer (web UI → *Update*): upload `firmware.bin` first and let it reboot, then `littlefs.bin`. Starting with this version the settings are kept across the filesystem update.
-2. **Switch the profile:** heater web UI → *Settings* → *Printer Connection Profile* → **Klipper / COSMOS** → *Save* (the heater restarts). Reserve the heater's IP address in your router.
+2. **Switch the profile:** heater web UI → *Settings* → *Printer Connection Profile* → **Klipper / COSMOS** → *Save* (the heater restarts).
 3. **Upload the plugin** (from the release asset `cc_heater-klipper-plugin.zip` or the [`klipper/`](klipper) folder) in Fluidd → *Configuration*:
    - create a folder `cc_heater` and upload `__init__.py` into it,
-   - upload `cc_heater.cfg` next to `printer.cfg` and set `host:` to the heater's IP address.
+   - upload `cc_heater.cfg` next to `printer.cfg`. It uses `host: ccheater.local`, which the plugin (1.1.0-beta.2 or newer) finds via mDNS even after the heater's IP address changes; if that does not work in your network, use the heater's IP address instead (see [Heater address](klipper/README.md#heater-address)).
 4. **Link the plugin** once over SSH (`ssh root@<printer-ip>`):
 
    ```sh

@@ -55,12 +55,12 @@ it from Fluidd/Moonraker without SSH, so it is linked from there.
 1. **Heater:** open its web UI → *Settings* → *Printer Connection Profile* →
    **Klipper / COSMOS** → *Save* (the heater restarts). Leave
    *Temperature Control Source* on **Printer chamber sensor** unless you want to
-   regulate on the heater's own DS18B20. Reserve the heater's IP address in your
-   router.
+   regulate on the heater's own DS18B20.
 2. **Upload the plugin** into the printer config folder as
    `cc_heater/__init__.py` (Fluidd → *Configuration* → create folder `cc_heater`,
    upload `__init__.py`), and upload [`cc_heater.cfg`](cc_heater.cfg) next to
-   `printer.cfg`. Set `host:` in `cc_heater.cfg` to the heater's IP address.
+   `printer.cfg`. Keep `host: ccheater.local` (see
+   [Heater address](#heater-address)) or set the heater's IP address.
 3. **Link the plugin** over SSH (once):
 
    ```sh
@@ -96,6 +96,19 @@ On plain Klipper/Kalico without COSMOS, place the `cc_heater` folder in
 `klippy/plugins/` (Kalico) or copy `__init__.py` as `klippy/extras/cc_heater.py`
 (Klipper). If your config has no `M191` macro, set `register_m191: True` in
 `[cc_heater]` and drop the `[gcode_macro M191]` section from `cc_heater.cfg`.
+
+### Heater address
+
+The heater announces itself as `ccheater.local`. COSMOS cannot resolve
+`.local` names by itself (`ping ccheater.local` reports `bad address`), so the
+plugin (since 1.1.0-beta.2) asks the heater directly with a one-shot mDNS
+query. It does so at startup and again whenever the heater stops answering, so
+a new IP address from DHCP is picked up automatically. `CC_HEATER_STATUS` shows
+the name together with the address in use.
+
+If the lookup fails in your network (some routers drop multicast between
+WiFi clients), `CC_HEATER_STATUS` reports `no mDNS answer`. Then set `host:` to
+the heater's IP address and reserve that address in your router.
 
 ## OrcaSlicer
 
@@ -133,7 +146,7 @@ anyway. Cancelling the print aborts the wait.
 
 | Option | Default | Description |
 |---|---|---|
-| `host` | — | Heater IP address or hostname |
+| `host` | — | Heater IP address or hostname; `*.local` names (e.g. `ccheater.local`) are resolved by the plugin via mDNS |
 | `port` | `80` | Heater HTTP port |
 | `heater` | `chamber_heater` | Name of the `[heater_generic]` using `cc_heater:pwm` |
 | `chamber_sensor` | `temperature_sensor chamber` | Printer sensor forwarded to the heater |
@@ -150,9 +163,10 @@ G-code commands: `M141 S<temp>`,
 `CC_HEATER_STATUS`, plus the standard `SET_HEATER_TEMPERATURE
 HEATER=chamber_heater TARGET=<temp>`.
 
-The printer object `cc_heater` exposes `connected`, `heating`, `fan`, `fault`,
-`device_fault`, `source`, `heater_temp`, `chamber_temp`, `device_target`,
-`max_temp`, `firmware` and `last_error` for macros and dashboards.
+The printer object `cc_heater` exposes `connected`, `host`, `address`,
+`heating`, `fan`, `fault`, `device_fault`, `source`, `heater_temp`,
+`chamber_temp`, `device_target`, `max_temp`, `firmware` and `last_error` for
+macros and dashboards.
 
 ## License
 
